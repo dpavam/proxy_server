@@ -62,7 +62,46 @@ async def fetch_data(gene_id: str):
 # Check what the content is and construct the dictionary
 @app.get("/api/traits/parents/{gene_id}")
 async def parent_data_mappings(gene_id: str):
-    pass
+    """Fetches parent data for each EFO from a gene"""
+    # Fetch EFOs for a given gene
+    traits = await fetch_data(gene_id)
+    # Fetch the parents for each efo trait
+    parent_tasks = [fetch_parent_data(trait["key"]) for trait in traits]
+    data = await asyncio.gather(*parent_tasks)
+    return data
+
+# Helpers
+async def fetch_data(gene_id: str):
+    """Fetches trait data for the specified HUMAN gene from GWAS catalog"""
+    url = f"https://www.ebi.ac.uk/gwas/api/v2/genes/{gene_id}/traits?size=5000"
+    # r = requests.get(url)
+    async with httpx.AsyncClient() as client:
+        r = await client.get(url)
+        if r.status_code == 200:
+            data = r.json()
+            l = data['page']['totalElements']
+            traits = extract_traits(data, l)
+            return unique_traits(traits)
+        else:
+            raise HTTPException(status_code=r.status_code, detail="Failed to fetch data")
+
+async def fetch_parent_data(trait_id: str):
+    """Fetches parent trait data for a specified EFO term"""
+    url = f"https://www.ebi.ac.uk/gwas/rest/api/parentMapping/{trait_id}"
+    async with httpx.AsyncClient() as client:
+        r = await client.get(url)
+        if r.status_code == 200:
+            data = r.json()
+            # ColourLabel seems to be more informative
+            trait_data = {
+                "trait_id": trait_id,
+                "trait": data.get("trait", None),
+                "parent": data.get("parent", None),
+                "colourLabel": data.get("colourLabel", None)
+            }
+            return trait_data
+        else:
+            raise HTTPException(status_code=r.status_code, detail="Failed to fetch data")
 
 def extract_traits(data, length=LENGTH):
     """ Parses the GWAS catalog API response to extract the EFOs and their labels"""
